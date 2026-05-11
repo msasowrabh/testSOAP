@@ -1,0 +1,1486 @@
+{
+	"info": {
+		"_postman_id": "valero-ivr-api-2026",
+		"name": "Valero Payment Services - IVR API",
+		"description": "API collection for Valero Payment Services / IVR Data Interface. This collection includes all 24 endpoints for card management, account queries, payments, and more.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "ivrLogin (Security Token)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"#IV\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/security/ivrLogin/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"security",
+								"ivrLogin",
+								""
+							]
+						},
+						"description": "Takes as input the username and returns an authorization token. The token is valid for up to 4 hours."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Authentication endpoint",
+									"pm.test('Status code is 200 OK', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has token', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('token');",
+									"    pm.expect(jsonData.token).to.be.a('string');",
+									"    pm.expect(jsonData.token).to.have.length.above(0);",
+									"});",
+									"",
+									"// Save token for subsequent requests",
+									"if (pm.response.code === 200) {",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('auth_token', jsonData.token);",
+									"    // Token valid for 4 hours",
+									"    const expiryTime = Date.now() + (4 * 60 * 60 * 1000);",
+									"    pm.environment.set('token_expiry', expiryTime);",
+									"    console.log('Auth token saved, expires in 4 hours');",
+									"}"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Lookup & Query",
+			"item": [
+				{
+					"name": "ANI (Lookup Account Number from ANI)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"ip_address\": \"{{ip_address}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/ani/:captured_ani",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"ani",
+								":captured_ani"
+							],
+							"variable": [
+								{
+									"key": "captured_ani",
+									"value": "8005551234",
+									"description": "The ANI (phone number) to lookup"
+								}
+							]
+						},
+						"description": "Takes in the ANI as input and returns the customer's account number. Returns account if the ANI is tied to a single account."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: ANI Lookup",
+									"pm.test('Status code is 200 or 404', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Response contains account information', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('account_number');",
+									"    });",
+									"    ",
+									"    // Save account number for other tests",
+									"    const jsonData = pm.response.json();",
+									"    pm.environment.set('found_account', jsonData.account_number);",
+									"} else {",
+									"    pm.test('404 response indicates ANI not found', function () {",
+									"        pm.expect(pm.response.code).to.equal(404);",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "DNIS Query",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"ip_address\": \"{{ip_address}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/dnis/:dnis_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"dnis",
+								":dnis_number"
+							],
+							"variable": [
+								{
+									"key": "dnis_number",
+									"value": "5092",
+									"description": "The DNIS number to query"
+								}
+							]
+						},
+						"description": "Called at the beginning of every call to determine which brand the caller's DNIS corresponds to as well as whether the call center is open and whether to play an out of office message."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: DNIS Query",
+									"pm.test('Status code is 200 OK', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response contains brand information', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('brand');",
+									"    pm.expect(jsonData).to.have.property('is_open');",
+									"});",
+									"",
+									"pm.test('Brand is valid', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData.brand).to.be.oneOf(['Valero', 'Diamond Shamrock', 'Shamrock', 'Beacon']);",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Message Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"ip_address\": \"{{ip_address}}\",\n  \"brand\": \"Valero\",\n  \"language\": \"E\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/msg/:msg_id",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"msg",
+								":msg_id"
+							],
+							"variable": [
+								{
+									"key": "msg_id",
+									"value": "NOTFND_MSG",
+									"description": "Message ID to retrieve"
+								}
+							]
+						},
+						"description": "Takes a message ID and input and returns the details of that message. Language: 'E' for English, 'S' for Spanish."
+					},
+					"response": []
+				},
+				{
+					"name": "Account Query",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/acct/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"acct",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Retrieves the account information based on account number passed in."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Account Query",
+									"pm.test('Status code is 200 or 404', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Response contains complete account data', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('account_number');",
+									"        pm.expect(jsonData).to.have.property('balance');",
+									"        pm.expect(jsonData).to.have.property('available_credit');",
+									"        pm.expect(jsonData).to.have.property('payment_due_date');",
+									"    });",
+									"    ",
+									"    pm.test('Balance fields are numeric', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData.balance).to.be.a('number');",
+									"        pm.expect(jsonData.available_credit).to.be.a('number');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "VALE (Validate Extension)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/vale/:extension_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"vale",
+								":extension_number"
+							],
+							"variable": [
+								{
+									"key": "extension_number",
+									"value": "5092",
+									"description": "Extension number to validate"
+								}
+							]
+						},
+						"description": "Takes a user entered extension and ensures that it is a valid extension and can accept a transferred call."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Validate Extension",
+									"pm.test('Status code is 200 OK', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response indicates if extension is valid', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('valid');",
+									"    pm.expect(jsonData.valid).to.be.a('boolean');",
+									"});"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Card Management",
+			"item": [
+				{
+					"name": "CAST (Cancel a Stolen Card)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"12345\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/cast/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"cast",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes as input the account number and the sub card number and cancels the card associated with that sub account number. Does not flag the card for reissue. command_code = 5-digit card number"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Card Management Operation",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Operation successful', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('success');",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"    });",
+									"} else {",
+									"    pm.test('Error response contains message', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('error');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "REIN (Activate a Card)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"12345\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/rein/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"rein",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes the account number and the sub card number to activate a card. command_code = 'All' or 5-digit card number"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Card Management Operation",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Operation successful', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('success');",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"    });",
+									"} else {",
+									"    pm.test('Error response contains message', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('error');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Add (Add New Cards)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"2\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/add/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"add",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes as input the account number along with the number of new cards that the caller wants. Can only be used if caller is authenticated as account owner. command_code = number of cards"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Card Management Operation",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Operation successful', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('success');",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"    });",
+									"} else {",
+									"    pm.test('Error response contains message', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('error');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "DUP (Reissue a Card)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"12345\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/dup/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"dup",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes as input the account number and the sub card number and flags the card to be reissued. Can only be used if caller is authenticated. command_code = 5-digit card number"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Card Management Operation",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Operation successful', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('success');",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"    });",
+									"} else {",
+									"    pm.test('Error response contains message', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('error');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "ADDN (Add New Cards with Recorded Names)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"2\",\n  \"ext_parm1\": \"https://example.com/recordings/names.wav\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/addn/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"addn",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes as input the account number along with the number of new cards that the caller wants and a URL pointing to the caller recording of the names they want on the new cards. Can only be used if caller is authenticated as account owner. command_code = number of cards, ext_parm1 = URL pointing to name on card(s) recording"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Card Management Operation",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Operation successful', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('success');",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"    });",
+									"} else {",
+									"    pm.test('Error response contains message', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('error');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "LSCR (Lost or Stolen Card Recording)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"ext_parm1\": \"https://example.com/recordings/lost_card.wav\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/lscr/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"lscr",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Send to the Valero backend a URL pointing to a caller recording regarding a lost or stolen card. Caller does not know card sub number and does not want to cancel all cards. ext_parm1 = URL pointing to lost/stolen card recording"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Card Management Operation",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Operation successful', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('success');",
+									"        pm.expect(jsonData.success).to.be.true;",
+									"    });",
+									"} else {",
+									"    pm.test('Error response contains message', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('error');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Transactions & Account Info",
+			"item": [
+				{
+					"name": "TRCD (Last 10 Transactions)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"12345\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/trcd/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"trcd",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes the account number and the sub account number and returns the last 10 transactions that have not been billed. command_code = 5-digit card number"
+					},
+					"response": []
+				},
+				{
+					"name": "CKRT (Check Bank Routing Number)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"111000025\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/ckrt/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"ckrt",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes a user entered bank routing number and ensures that it is a valid bank routing number. command_code = bank routing number"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Payments",
+			"item": [
+				{
+					"name": "PPAY (Pay Bill)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_amount\": \"100.00\",\n  \"command_date\": \"20250215\",\n  \"ext_parm1\": \"C\",\n  \"ext_parm2\": \"004776055754\",\n  \"ext_parm3\": \"111000025\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/ppay/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"ppay",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes as input the account number along with payment information (amount and date) and bank account information. ext_parm1 = C or S (Checking or Savings), ext_parm2 = Bank account number, ext_parm3 = Bank routing number"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Payment Operation",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400, 422]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Payment processed successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('confirmation_number');",
+									"        pm.expect(jsonData.confirmation_number).to.be.a('string');",
+									"    });",
+									"    ",
+									"    pm.test('Payment details included in response', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('amount');",
+									"        pm.expect(jsonData).to.have.property('payment_date');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "PTP (Promise to Pay)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"P\",\n  \"command_amount\": \"150.00\",\n  \"command_date\": \"20250220\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/ptp/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"ptp",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes account number, a promise to pay amount, and a promise to pay date as input. command_code = P (Phone), O (Online), or M (Mail)"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Payment Operation",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400, 422]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Payment processed successfully', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('confirmation_number');",
+									"        pm.expect(jsonData.confirmation_number).to.be.a('string');",
+									"    });",
+									"    ",
+									"    pm.test('Payment details included in response', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('amount');",
+									"        pm.expect(jsonData).to.have.property('payment_date');",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Statements",
+			"item": [
+				{
+					"name": "EMAL (Send Statement by Email)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"CM\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/emal/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"emal",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes account number as input and sends a message to the backend to send out a statement to the account holder via email. command_code = CM (Current Month), PM (Previous Month), 20XX (Year), or GAA"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Statement Delivery",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Statement delivery queued', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('queued');",
+									"        pm.expect(jsonData.queued).to.be.true;",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "FAX (Send Statement by FAX)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"CM\",\n  \"ext_parm1\": \"8005551234\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/fax/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"fax",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes account number as input and sends a message to the backend to send out a statement to the account holder via fax. command_code = CM, PM, 20XX, or GAA. ext_parm1 = Caller's FAX number"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Statement Delivery",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Statement delivery queued', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('queued');",
+									"        pm.expect(jsonData.queued).to.be.true;",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "PRNT (Send Statement by Mail)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"CM\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/prnt/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"prnt",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes account number as input and sends a message to the backend to send out the current or previous statement to the account holder via mail. command_code = CM, PM, 20XX, or GAA"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Statement Delivery",
+									"pm.test('Status code is 200 or 400', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Statement delivery queued', function () {",
+									"        const jsonData = pm.response.json();",
+									"        pm.expect(jsonData).to.have.property('queued');",
+									"        pm.expect(jsonData.queued).to.be.true;",
+									"    });",
+									"}"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Account Management",
+			"item": [
+				{
+					"name": "SUPB (Suppress Bank Information)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/supb/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"supb",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Sends a note to the Valero backend that the caller does not want Valero to keep the bank information on file. This should prevent bank information from being returned from the account query service during future calls."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Account Management Operation",
+									"pm.test('Status code is 200 OK', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Operation completed successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "CRLR (Credit Limit Request)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_amount\": \"5000.00\",\n  \"ext_parm1\": \"O\",\n  \"ext_parm2\": \"75000\",\n  \"ext_parm3\": \"1200\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/crlr/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"crlr",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Requests a new credit limit for this account. command_amount = Credit limit requested, ext_parm1 = R or O (Rent or Own), ext_parm2 = Annual gross income, ext_parm3 = Monthly rent cost"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Account Management Operation",
+									"pm.test('Status code is 200 OK', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Operation completed successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "IVRV (IVR Authenticated)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"command_code\": \"Y\",\n  \"ext_parm1\": \"O\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/ivrv/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"ivrv",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Send a flag to the Valero backend determining whether the caller has authenticated or not. command_code = Y/N (User successfully entered SSN), ext_parm1 = O (Owner), U (User), or N (Neither)"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Account Management Operation",
+									"pm.test('Status code is 200 OK', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Operation completed successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "LOGP (LOG Phone Number / Account Associations)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"brand\": \"Valero\",\n  \"ext_parm1\": \"8005551234\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/logp/:account_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"logp",
+								":account_number"
+							],
+							"variable": [
+								{
+									"key": "account_number",
+									"value": "1234567890",
+									"description": "10-digit account number"
+								}
+							]
+						},
+						"description": "Takes as input the account number and the ANI and logs the phone number associated with the account number in the background. ext_parm1 = ANI (phone number)"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"// Test: Account Management Operation",
+									"pm.test('Status code is 200 OK', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Operation completed successfully', function () {",
+									"    const jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Transfer",
+			"item": [
+				{
+					"name": "XFIN (Transfer from Agent back to IVR)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"ip_address\": \"{{ip_address}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/ivr_command/xfin/:dnis_number",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ivr_command",
+								"xfin",
+								":dnis_number"
+							],
+							"variable": [
+								{
+									"key": "dnis_number",
+									"value": "5092",
+									"description": "DNIS number"
+								}
+							]
+						},
+						"description": "Transfer a caller back to the IVR from an agent and return all the data needed in the IVR."
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://lsbetxsahqt1:8443/r2-interfaces/api",
+			"type": "string",
+			"description": "Test server base URL. For production, use: https://lsbetxsawh01:8443/r2-interfaces/api"
+		},
+		{
+			"key": "ip_address",
+			"value": "192.168.1.100",
+			"type": "string",
+			"description": "IP address of the application server"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Collection-level pre-request script",
+					"// Set default headers if not already set",
+					"if (!pm.request.headers.has('Content-Type')) {",
+					"    pm.request.headers.add({",
+					"        key: 'Content-Type',",
+					"        value: 'application/json'",
+					"    });",
+					"}",
+					"",
+					"// Check if we need to get auth token",
+					"const token = pm.environment.get('auth_token');",
+					"const tokenExpiry = pm.environment.get('token_expiry');",
+					"const now = Date.now();",
+					"",
+					"// Token is valid for 4 hours according to API docs",
+					"if (!token || !tokenExpiry || now > tokenExpiry) {",
+					"    console.log('Auth token missing or expired, will need to authenticate');",
+					"}",
+					"",
+					"// Log request details for debugging",
+					"console.log('Request:', pm.request.method, pm.request.url.toString());"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Collection-level test script",
+					"// Common tests that run for all requests",
+					"",
+					"// Test 1: Response time should be reasonable",
+					"pm.test('Response time is less than 5000ms', function () {",
+					"    pm.expect(pm.response.responseTime).to.be.below(5000);",
+					"});",
+					"",
+					"// Test 2: Response should not be an error (4xx/5xx handled in specific tests)",
+					"if (pm.response.code >= 200 && pm.response.code < 300) {",
+					"    pm.test('Successful response (2xx)', function () {",
+					"        pm.response.to.be.success;",
+					"    });",
+					"}",
+					"",
+					"// Test 3: Response should have proper content-type for JSON responses",
+					"if (pm.response.headers.get('Content-Type')) {",
+					"    const contentType = pm.response.headers.get('Content-Type');",
+					"    if (contentType.includes('json')) {",
+					"        pm.test('Response is JSON format', function () {",
+					"            pm.response.to.be.json;",
+					"        });",
+					"    }",
+					"}",
+					"",
+					"// Log response for debugging",
+					"console.log('Response Status:', pm.response.code, pm.response.status);",
+					"console.log('Response Time:', pm.response.responseTime + 'ms');"
+				]
+			}
+		}
+	]
+}
