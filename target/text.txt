@@ -1,172 +1,31 @@
-package com.assurant.gt.ccd.softphone.finesse.apim;
-
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-
-import org.apache.http.HttpEntity;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.ContentType;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.InitializingBean;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.env.Environment;
-import org.springframework.stereotype.Component;
-
-import com.assurant.gt.ccd.softphone.finesse.InvalidConfigurationException;
-
-@Component
-public class CallDataClient implements InitializingBean {
-
-	private static final Logger logger = LogManager.getLogger(CallDataClient.class.getName());
-
-	@Autowired
-	protected Environment environment;
-
-	@Autowired
-	protected TokenClient tokenClient;
-
-	private static String callDataRetrieveUrl;
-	private static String callDataUpdateUrl;
-	private static String subscriptionKey;
-	
-	@Override
-	public void afterPropertiesSet() throws Exception {
-		String runtimeEnv = com.assurant.gt.ccd.softphone.finesse.security.Environment.getEnv();
-
-        String url = environment.getProperty("call.data.url." + runtimeEnv);
-        callDataRetrieveUrl = url + "/retrieve";
-        callDataUpdateUrl = url + "/update";
-        
-		subscriptionKey = environment.getProperty("call.data.subscriptionKey."+ runtimeEnv);
-
-		if (url == null || subscriptionKey == null) {
-			throw new InvalidConfigurationException(
-					"Invalid configuration for the application. Call Data keys were expected in database but is missing or misspelled.");
-		}
-	}
-
-	protected String retrieve(String message) {
-		StringBuffer responseCallData = new StringBuffer();
-		String token = tokenClient.getAccessToken();
-
-		CloseableHttpClient httpclient = HttpClientBuilder.create().build();
-		HttpPost post = new HttpPost(callDataRetrieveUrl);
-		if (token != null) {
-			post.setHeader(org.apache.http.HttpHeaders.AUTHORIZATION, "Bearer " + token);
-			post.setHeader("Ocp-Apim-Subscription-Key", subscriptionKey);
-
-		}
-
-		CloseableHttpResponse response = null;
-		try {
-			StringEntity se = new StringEntity(message, ContentType.create("application/json", "UTF-8"));
-			post.setEntity(se);
-
-			response = httpclient.execute(post);
-			if(response.getStatusLine().getStatusCode() != 200) {
-				logger.info("Call Data response code:" + response.getStatusLine().getStatusCode() + " - "
-						+ response.getStatusLine().getReasonPhrase());
-			}
-			
-			HttpEntity entity = response.getEntity();
-
-			if (entity != null) {
-				BufferedReader rd = null;
-				String line = "";
-				try {
-					rd = new BufferedReader(new InputStreamReader(entity.getContent()));
-					while ((line = rd.readLine()) != null) {
-						responseCallData.append(line);
-						logger.debug("Call Data response:", line);
-					}
-
-				} catch (Exception e) {
-					logger.error("Error reading response.", e);
-				} finally {
-					try {
-						if (rd != null) {
-							rd.close();
-						}
-					} catch (IOException e) {
-						logger.error("Error reading response.", e);
-					}
-				}
-			}
-
-		} catch (Exception e) {
-			logger.error("Error calling " + callDataRetrieveUrl, e);
-		} finally {
-			if (response != null) {
-				try {
-					response.close();
-				} catch (IOException e) {
-					logger.error("Error closing response from " + callDataRetrieveUrl, e);
-				}
-			}
-		}
-
-		try {
-			httpclient.close();
-		} catch (IOException e) {
-			logger.error("Error closing client to " + callDataRetrieveUrl, e);
-		}
-		return responseCallData.toString();
-
-	}
-
-	protected Runnable update(String message) {
-
-		return new Runnable() {
-
-			@Override
-			public void run() {
-
-				String token = tokenClient.getAccessToken();
-
-				CloseableHttpClient httpclient = HttpClients.createDefault();
-				HttpPost post = new HttpPost(callDataUpdateUrl);
-				if (token != null) {
-					post.setHeader(org.apache.http.HttpHeaders.AUTHORIZATION, "Bearer " + token);
-					post.setHeader("Ocp-Apim-Subscription-Key", subscriptionKey);
-				}
-
-				CloseableHttpResponse response = null;
-				try {
-					StringEntity se = new StringEntity(message, ContentType.create("application/json", "UTF-8"));
-					post.setEntity(se);
-
-					response = httpclient.execute(post);
-					if(response.getStatusLine().getStatusCode() != 200) {
-					logger.info("Call Data response code:" + response.getStatusLine().getStatusCode() + " - "
-							+ response.getStatusLine().getReasonPhrase());
-					}
-				} catch (Exception e) {
-					logger.error("Error calling " + callDataUpdateUrl, e);
-				} finally {
-					if (response != null) {
-						try {
-							response.close();
-						} catch (IOException e) {
-							logger.error("Error closing response from " + callDataUpdateUrl, e);
-						}
-					}
-				}
-
-				try {
-					httpclient.close();
-				} catch (IOException e) {
-					logger.error("Error closing client to " + callDataUpdateUrl, e);
-				}
-
-			}
-		};
-
-	}
+ {
+    "callId": "CSR2XFZHV5TP3PDD",
+    "koreSessionId": "abc_testValue",
+    "userId": "d38b5740-097b-4cf8-adc7-8b5ea598142d",
+    "threadId": "24df68b5-d86b-4186-98c6-b12f8b7c60b9",
+    "webPayload": {
+        "n": "Jane Doe",
+        "E": "07406",
+        "I": "987654322",
+        "M": "",
+        "i": "",
+        "L": "",
+        "p": "",
+        "v": "",
+        "w": "",
+        "g": "",
+        "o": "Monday - Friday: 8:30 AM - 9:00 PM EST|",
+        "x": "",
+        "y": "",
+        "R": "mtb",
+        "z": "https://mdl.mycoverageinfo.com/mtb/policy-manager/contact-us",
+        "O": "123 Plain St, Chicago, IL 11223",
+        "q": "M&amp;T Bank|Its Successors and/or Assigns|P.O. Box 5738|Springfield, OH 45501-5738",
+        "MC": "M&amp;T Bank|Its Successors and/or Assigns|P.O. Box 5738|Springfield, OH 45501",
+        "S": "John Doe",
+        "Q": "(888) 882-1847",
+        "u": "",
+        "customerName": "sowrabh2",
+        "conversationId": "CSR2XFZHV5TP3PDD"
+    }
 }
