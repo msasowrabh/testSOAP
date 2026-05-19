@@ -1,211 +1,31 @@
-var finesse = finesse || {};
-finesse.modules = finesse.modules || {};
-
-finesse.modules.Gadget = (function ($) {
-
-    var user, media, mrdID = "", mediaDialogs, clientLogs;
-
-	var currentScript = (document.currentScript || {}).src || "";
-	var wsPath = currentScript.replace(/\/script.*/,"");
-    var RETRIEVE_URL   = wsPath + "/softphone/callData/retrieve";
-    /* ==============================
-       DIALOG HANDLERS
-    ============================== */
-
-    function handleDialogAdd(dialog) {
-        var dialogMediaId = dialog._data.mediaProperties.mediaId;
-        clientLogs.log("[handleDialogAdd] Dialog arrived - dialogMediaId=" + dialogMediaId + ", expected mrdID=" + mrdID);
-
-        if (dialogMediaId !== mrdID) {
-            clientLogs.log("[handleDialogAdd] Skipping dialog — mediaId mismatch");
-            return;
-        }
-
-        clientLogs.log("Chat arrived!");
-
-        var callVars = dialog._data.mediaProperties;
-        clientLogs.log("Call Vars: " + JSON.stringify(callVars));
-
-        var callVariablesRaw = callVars.callvariables;
-        clientLogs.log("[handleDialogAdd] callvariables raw: " + JSON.stringify(callVariablesRaw));
-
-        var callVariablesArray = callVars.callvariables.CallVariable;
-        if (!Array.isArray(callVariablesArray)) {
-            clientLogs.log("[handleDialogAdd] WARNING: CallVariable is not an array, got type=" + typeof callVariablesArray + ", value=" + JSON.stringify(callVariablesArray));
-        } else {
-            clientLogs.log("[handleDialogAdd] CallVariable count: " + callVariablesArray.length);
-        }
-        clientLogs.log("callVariablesArray: " + JSON.stringify(callVariablesArray));
-
-        // Helper function
-        function getCallVariable(name) {
-            var item = Array.isArray(callVariablesArray) && callVariablesArray.find(cv => cv.name === name);
-            var value = item && item.value ? item.value : "";
-            clientLogs.log("[getCallVariable] " + name + " = " + (value || "(empty)"));
-            return value;
-        }
-
-        var mediaResourceId = getCallVariable("user_DR_MediaResourceID");
-        clientLogs.log("user_DR_MediaResourceID: " + mediaResourceId);
-
-        if (!mediaResourceId) {
-            clientLogs.log("[handleDialogAdd] WARNING: mediaResourceId is empty — API call will proceed with empty callId");
-        }
-
-        var requestBody = JSON.stringify({ callId: mediaResourceId });
-        clientLogs.log("[handleDialogAdd] Calling Retrieve API - URL=" + RETRIEVE_URL + " X-Correlation-Id=" + mediaResourceId + " body=" + requestBody);
-        
-		fetch(RETRIEVE_URL, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-Correlation-Id": mediaResourceId
-                    },
-                    body: requestBody
-            })
-            .then(function(response) {
-                if (!response.ok) throw new Error("HTTP " + response.status);
-                return response.json();
-            })
-            .then(function(apiData) {
-                clientLogs.log("API response: " + JSON.stringify(apiData));
-                clientLogs.log("[handleDialogAdd] apiData keys: " + Object.keys(apiData).join(", "));
-
-                var webPayload = apiData.webPayload;
-                clientLogs.log("[handleDialogAdd] webPayload present=" + (webPayload != null) + " value=" + JSON.stringify(webPayload));
-
-                var chatData = mapWebPayload(webPayload);
-                clientLogs.log("Mapped chat data: " + JSON.stringify(chatData));
-                clientLogs.log("[handleDialogAdd] chatData keys: " + Object.keys(chatData).join(", "));
-
-                clientLogs.log("[handleDialogAdd] Calling finesseBridge.setChatData...");
-                if (window.finesseBridge) {
-                    window.finesseBridge.setChatData(chatData);
-                    if (window.finesseBridge.adjustHeight) {
-                        clientLogs.log("[handleDialogAdd] Calling finesseBridge.adjustHeight...");
-                        window.finesseBridge.adjustHeight();
-                    }
-                }
-                clientLogs.log("[handleDialogAdd] Data flow complete");
-            })
-            .catch(function(err) {
-                clientLogs.log("Failed to fetch chat data: " + err.message);
-                clientLogs.log("[handleDialogAdd] Error stack: " + (err.stack || "unavailable"));
-            });
+{
+    "callId": "CSR2XFZHV5TP3PDD",
+    "koreSessionId": "abc_testValue",
+    "userId": "d38b5740-097b-4cf8-adc7-8b5ea598142d",
+    "threadId": "24df68b5-d86b-4186-98c6-b12f8b7c60b9",
+    "webPayload": {
+        "n": "Jane Doe",
+        "E": "07406",
+        "I": "987654321",
+        "M": "",
+        "i": "",
+        "L": "",
+        "p": "",
+        "v": "",
+        "w": "",
+        "g": "",
+        "o": "Monday - Friday: 8:30 AM - 9:00 PM EST|",
+        "x": "",
+        "y": "",
+        "R": "mtb",
+        "z": "https://mdl.mycoverageinfo.com/mtb/policy-manager/contact-us",
+        "O": "123 Plain St, Chicago, IL 11223",
+        "q": "M&amp;T Bank|Its Successors and/or Assigns|P.O. Box 5738|Springfield, OH 45501-5738",
+        "MC": "M&amp;T Bank|Its Successors and/or Assigns|P.O. Box 5738|Springfield, OH 45501",
+        "S": "John Doe",
+        "Q": "(888) 882-1847",
+        "u": "",
+        "customerName": "sowrabh2",
+        "conversationId": "CSR2XFZHV5TP3PDD"
     }
-
-    function handleDialogDelete(dialog) {
-        clientLogs.log("Chat ended");
-
-        if (window.finesseBridge) {
-            window.finesseBridge.setChatData(null);
-        }
-    }
-
-    function handleDialogsLoad() {
-        clientLogs.log("Dialogs loaded");
-
-        var dialogs = mediaDialogs.getCollection();
-        var dialogIds = Object.keys(dialogs);
-        clientLogs.log("[handleDialogsLoad] Dialog count: " + dialogIds.length + " ids=[" + dialogIds.join(", ") + "]");
-
-        for (var id in dialogs) {
-            clientLogs.log("[handleDialogsLoad] Processing dialog id=" + id);
-            handleDialogAdd(dialogs[id]);
-        }
-    }
-
-    function loadDialogs() {
-        clientLogs.log("Loading dialogs...");
-
-        mediaDialogs = media.getMediaDialogs({
-            onCollectionAdd: handleDialogAdd,
-            onCollectionDelete: handleDialogDelete,
-            onLoad: handleDialogsLoad
-        });
-    }
-
-
-
-
-    /* ==============================
-       MEDIA HANDLERS
-    ============================== */
-
-    function handleMediaLoad(_media) {
-        clientLogs.log("Media loaded");
-
-        media = _media;
-        loadDialogs();
-    }
-
-    function handleMediaChange(_media) {
-        if (_media._data.id === mrdID) {
-            clientLogs.log("Media state changed: " + _media.getState());
-        }
-    }
-
-    function handleMediaError(err) {
-        clientLogs.log("Media error: " + JSON.stringify(err));
-    }
-
-    /* ==============================
-       USER HANDLERS
-    ============================== */
-
-    function handleUserLoad() {
-        clientLogs.log("User loaded");
-        //window.finesseBridge.setTeam("sales")
-
-        user.getMediaList({
-            onLoad: function (mediaList) {
-
-                clientLogs.log("MediaList loaded");
-
-                mediaList.getMedia({
-                    id: mrdID,
-                    onLoad: handleMediaLoad,
-                    onChange: handleMediaChange,
-                    onError: handleMediaError
-                });
-
-            }
-        });
-    }
-
-    function handleUserChange() {
-        clientLogs.log("User state changed: " + user.getState());
-    }
-
-
-    /* ==============================
-       INIT
-    ============================== */
-
-    return {
-        init: function (chatMrdId) {
-
-			mrdID = chatMrdId;
-            finesse.clientservices.ClientServices.init(finesse.gadget.Config);
-
-            // ✅ Initialize logger FIRST
-            clientLogs = finesse.cslogger.ClientLogger;
-            clientLogs.init(gadgets.Hub, "MSAChatDataGadget");
-			clientLogs.log("MrdID:"+mrdID);
-            clientLogs.log("chat Data Gadget initializing...");
-             if (window.__vueHubConnected) {
-                        window.__vueHubConnected();
-             }
-
-
-            user = new finesse.restservices.User({
-                id: finesse.gadget.Config.id,
-                onLoad: handleUserLoad,
-                onChange: handleUserChange
-            });
-
-            
-        }
-    };
-
-}(jQuery));
+}
