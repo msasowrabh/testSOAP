@@ -5,8 +5,8 @@ finesse.modules.Gadget = (function ($) {
 
     var user, media, mrdID = "", mediaDialogs, clientLogs;
 
-	var currentScript = document.currentScript.src;
-	var wsPath = currentScript.replace(/\/script.*/,""); 
+	var currentScript = (document.currentScript || {}).src || "";
+	var wsPath = currentScript.replace(/\/script.*/,"");
     var RETRIEVE_URL   = wsPath + "/softphone/callData/retrieve";
     /* ==============================
        DIALOG HANDLERS
@@ -64,8 +64,10 @@ finesse.modules.Gadget = (function ($) {
                     body: requestBody
             })
             .then(function(response) {
-				debugger;
-				const apiData = response.txt();
+                if (!response.ok) throw new Error("HTTP " + response.status);
+                return response.json();
+            })
+            .then(function(apiData) {
                 clientLogs.log("API response: " + JSON.stringify(apiData));
                 clientLogs.log("[handleDialogAdd] apiData keys: " + Object.keys(apiData).join(", "));
 
@@ -77,10 +79,12 @@ finesse.modules.Gadget = (function ($) {
                 clientLogs.log("[handleDialogAdd] chatData keys: " + Object.keys(chatData).join(", "));
 
                 clientLogs.log("[handleDialogAdd] Calling finesseBridge.setChatData...");
-                window.finesseBridge.setChatData(chatData);
-                if (window.finesseBridge && window.finesseBridge.adjustHeight) {
-                    clientLogs.log("[handleDialogAdd] Calling finesseBridge.adjustHeight...");
-                    window.finesseBridge.adjustHeight();
+                if (window.finesseBridge) {
+                    window.finesseBridge.setChatData(chatData);
+                    if (window.finesseBridge.adjustHeight) {
+                        clientLogs.log("[handleDialogAdd] Calling finesseBridge.adjustHeight...");
+                        window.finesseBridge.adjustHeight();
+                    }
                 }
                 clientLogs.log("[handleDialogAdd] Data flow complete");
             })
@@ -93,7 +97,9 @@ finesse.modules.Gadget = (function ($) {
     function handleDialogDelete(dialog) {
         clientLogs.log("Chat ended");
 
-        window.finesseBridge.setChatData(null);
+        if (window.finesseBridge) {
+            window.finesseBridge.setChatData(null);
+        }
     }
 
     function handleDialogsLoad() {
