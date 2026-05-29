@@ -1,12 +1,307 @@
-<div class="header-stat-item">
-						<svg class="header-chats-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17.5 9.58336C17.5029 10.6832 17.2459 11.7683 16.75 12.75C16.162 13.9265 15.2581 14.916 14.1395 15.6078C13.021 16.2995 11.7319 16.6662 10.4167 16.6667C9.31678 16.6696 8.23176 16.4126 7.25 15.9167L2.5 17.5L4.08333 12.75C3.58744 11.7683 3.33047 10.6832 3.33333 9.58336C3.33384 8.26816 3.70051 6.97907 4.39227 5.86048C5.08402 4.7419 6.07355 3.838 7.25 3.25002C8.23176 2.75413 9.31678 2.49716 10.4167 2.50002H10.8333C12.5703 2.59585 14.2109 3.32899 15.441 4.55907C16.671 5.78915 17.4042 7.42973 17.5 9.16669V9.58336Z" stroke="#3C4D6A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-						<span class="header-stat-label">{{ $t('header.activeChats') }}</span>
-						<span class="header-stat-value" :class="{ 'is-active': activeChats !== 0 }">{{ activeChats }}</span>
-					</div>
-					<span class="header-stat-separator"></span>
-					<div class="header-stat-item">
-						<svg class="header-calls-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15.8333 12.2305L12.8491 11.0366L11.9645 12.512C11.7413 12.8838 11.2702 13.022 10.8813 12.8302C8.90732 11.8567 7.3098 10.2591 6.33622 8.28516C6.14441 7.89623 6.28262 7.42515 6.65442 7.20199L8.12903 6.31657L6.93599 3.33317H4.16663C3.94561 3.33317 3.73371 3.42103 3.57743 3.57731C3.42518 3.72956 3.33769 3.93459 3.33329 4.14941C3.52589 7.18445 4.81922 10.0453 6.97017 12.1963C9.12092 14.347 11.9815 15.6396 15.0162 15.8324C15.2314 15.8282 15.4367 15.7415 15.5892 15.589C15.7454 15.4327 15.8333 15.2209 15.8333 14.9998V12.2305ZM17.5 14.9998C17.5 15.6629 17.2364 16.2986 16.7675 16.7674C16.2987 17.2363 15.663 17.4998 15 17.4998C14.9831 17.4998 14.9663 17.4992 14.9495 17.4982C11.4957 17.2883 8.23848 15.8214 5.79179 13.3747C3.34509 10.928 1.87814 7.67074 1.66825 4.21696C1.66723 4.20016 1.66663 4.18334 1.66663 4.1665C1.66663 3.50346 1.93021 2.86777 2.39905 2.39893C2.86789 1.93008 3.50358 1.6665 4.16663 1.6665H7.49996C7.84071 1.6665 8.14733 1.87421 8.27388 2.19059L9.94055 6.35726C10.0923 6.73691 9.94606 7.17061 9.5955 7.38102L8.20146 8.2168C8.88793 9.33651 9.82924 10.2776 10.9489 10.9642L11.7854 9.57096L11.8278 9.50749C12.0502 9.20333 12.4534 9.08373 12.8092 9.22591L16.9759 10.8926C17.2923 11.0191 17.5 11.3257 17.5 11.6665V14.9998Z" fill="#3C4D6A"/></svg>
-						<span class="header-stat-label">{{ $t('header.activeCalls') }}</span>
-						<span class="header-stat-value" :class="{ 'is-active': activeCalls !== 0 }">{{ activeCalls }}</span>
-					</div>
-				</div>
+var finesse = finesse || {};
+finesse.modules = finesse.modules || {};
+
+finesse.modules.Gadget = (function ($) {
+
+    var graylog = {
+        init: function() {},
+        log: function() {},
+        info: function() {},
+        warn: function() {},
+        error: function() {},
+        debug: function() {}
+    };
+
+    var user, media, mrdID = "", mediaDialogs;
+    var scriptUrl;
+
+    var storedCallData = null;
+
+    function initializeChatDataLogger() {
+        var graylogFactory = window.graylogLogger;
+        if (graylogFactory && typeof graylogFactory.createLoggerFactory === "function") {
+            graylog = graylogFactory.createLoggerFactory({
+                gadgetName: "ChatDataGadget",
+                remoteEnabled: true,
+                level: "log",
+                remoteTransport: "pubsub",
+                getContext: function() {
+                    return window.logContext ? Object.assign({}, window.logContext) : {};
+                }
+            }).createClient("chatDataGadget");
+            graylog.init = function() {};
+            return;
+        }
+
+        var fallbackClient = finesse && finesse.cslogger && finesse.cslogger.ClientLogger;
+        if (fallbackClient && typeof fallbackClient.log === "function") {
+            graylog = {
+                init: function(hub, gadgetName) {
+                    if (typeof fallbackClient.init === "function") {
+                        fallbackClient.init(hub, gadgetName || "ChatDataGadget");
+                    }
+                },
+                log: function(msg) { fallbackClient.log(msg); },
+                info: function(msg) { fallbackClient.log(msg); },
+                warn: function(msg) { fallbackClient.log(msg); },
+                error: function(msg) { fallbackClient.log(msg); },
+                debug: function(msg) { fallbackClient.log(msg); }
+            };
+            return;
+        }
+
+        graylog = {
+            init: function() {},
+            log: function() {},
+            info: function() {},
+            warn: function() {},
+            error: function() {},
+            debug: function() {}
+        };
+    }
+
+    function callUpdate(fieldId, newValue) {
+        if (!storedCallData) {
+            graylog.info("[callUpdate] No stored call data, skipping");
+            return;
+        }
+        var shortKey = getShortKey(fieldId);
+        storedCallData.webPayload[shortKey] = newValue;
+        graylog.info("[callUpdate] fieldId=" + fieldId + " shortKey=" + shortKey + " newValue=" + newValue);
+
+        var UPDATE_URL     = scriptUrl + "/softphone/callData/update";
+        fetch(UPDATE_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Correlation-Id": storedCallData.callId || ""
+            },
+            body: JSON.stringify(storedCallData)
+        })
+        .then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.text();
+        })
+        .then(function (text) {
+            if (!text) {
+                graylog.info("[callUpdate] Update success (empty response)");
+                return;
+            }
+            var data = JSON.parse(text);
+            graylog.info("[callUpdate] Update success: " + JSON.stringify(data));
+            storedCallData = data;
+            var chatData = mapWebPayload(data.webPayload);
+            if (window.finesseBridge) {
+                window.finesseBridge.setChatData(chatData);
+            }
+        })
+        .catch(function (err) {
+            graylog.error("[callUpdate] Update failed: " + err.message);
+        });
+    }
+
+    /* ==============================
+       DIALOG HANDLERS
+    ============================== */
+
+    function handleDialogAdd(dialog) {
+        var dialogMediaId = dialog._data.mediaProperties.mediaId;
+        graylog.info("[handleDialogAdd] Dialog arrived - dialogMediaId=" + dialogMediaId + ", expected mrdID=" + mrdID);
+
+        if (dialogMediaId !== mrdID) {
+            graylog.error("[handleDialogAdd] Skipping dialog — mediaId mismatch");
+            return;
+        }
+
+        graylog.info("Chat arrived!");
+
+        var callVars = dialog._data.mediaProperties;
+        graylog.log("Call Vars: " + JSON.stringify(callVars));
+
+        var callVariablesRaw = callVars.callvariables;
+        graylog.log("[handleDialogAdd] callvariables raw: " + JSON.stringify(callVariablesRaw));
+
+        var callVariablesArray = callVars.callvariables.CallVariable;
+        if (!Array.isArray(callVariablesArray)) {
+            graylog.warn("[handleDialogAdd] WARNING: CallVariable is not an array, got type=" + typeof callVariablesArray + ", value=" + JSON.stringify(callVariablesArray));
+        } else {
+            graylog.info("[handleDialogAdd] CallVariable count: " + callVariablesArray.length);
+        }
+        graylog.log("callVariablesArray: " + JSON.stringify(callVariablesArray));
+
+        // Helper function
+        function getCallVariable(name) {
+            var item = Array.isArray(callVariablesArray) && callVariablesArray.find(cv => cv.name === name);
+            var value = item && item.value ? item.value : "";
+            graylog.log("[getCallVariable] " + name + " = " + (value || "(empty)"));
+            return value;
+        }
+
+        var mediaResourceId = getCallVariable("user_DR_MediaResourceID");
+        graylog.info("user_DR_MediaResourceID: " + mediaResourceId);
+
+        if (!mediaResourceId) {
+            graylog.warn("[handleDialogAdd] WARNING: mediaResourceId is empty — API call will proceed with empty callId");
+        }
+
+        var requestBody = JSON.stringify({ callId: mediaResourceId });
+        var RETRIEVE_URL = scriptUrl + "/softphone/callData/retrieve";
+        graylog.log("[handleDialogAdd] Calling Retrieve API - URL=" + RETRIEVE_URL + " X-Correlation-Id=" + mediaResourceId + " body=" + requestBody);
+        
+		fetch(RETRIEVE_URL, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-Correlation-Id": mediaResourceId
+                    },
+                    body: requestBody
+            })
+            .then(function(response) {
+                if (!response.ok) throw new Error("HTTP " + response.status);
+                return response.json();
+            })
+            .then(function(apiData) {
+                graylog.log("API response: " + JSON.stringify(apiData));
+                graylog.log("[handleDialogAdd] apiData keys: " + Object.keys(apiData).join(", "));
+
+                var webPayload = apiData.webPayload;
+                graylog.log("[handleDialogAdd] webPayload present=" + (webPayload != null) + " value=" + JSON.stringify(webPayload));
+
+                storedCallData = apiData;
+
+                var chatData = mapWebPayload(webPayload);
+                graylog.log("Mapped chat data: " + JSON.stringify(chatData));
+ 
+                if (window.finesseBridge) {
+                    window.finesseBridge.setChatData(chatData);
+                    window.finesseBridge._updateHandler = callUpdate;
+                    if (window.finesseBridge.adjustHeight) {
+                        graylog.debug("[handleDialogAdd] Calling finesseBridge.adjustHeight...");
+                        window.finesseBridge.adjustHeight();
+                    }
+                }
+                graylog.log("[handleDialogAdd] Data flow complete");
+            })
+            .catch(function(err) {
+                graylog.error("Failed to fetch chat data: " + err.message);
+                graylog.error("[handleDialogAdd] Error stack: " + (err.stack || "unavailable"));
+            });
+    }
+
+    function handleDialogDelete(dialog) {
+        graylog.info("Chat ended");
+
+        storedCallData = null;
+        if (window.finesseBridge) {
+            window.finesseBridge._updateHandler = null;
+            window.finesseBridge.setChatData(null);
+        }
+    }
+
+    function handleDialogsLoad() {
+        graylog.info("Dialogs loaded");
+
+        var dialogs = mediaDialogs.getCollection();
+        var dialogIds = Object.keys(dialogs);
+        graylog.info("[handleDialogsLoad] Dialog count: " + dialogIds.length + " ids=[" + dialogIds.join(", ") + "]");
+
+        for (var id in dialogs) {
+            graylog.log("[handleDialogsLoad] Processing dialog id=" + id);
+            handleDialogAdd(dialogs[id]);
+        }
+    }
+
+    function loadDialogs() {
+        graylog.log("Loading dialogs...");
+
+        mediaDialogs = media.getMediaDialogs({
+            onCollectionAdd: handleDialogAdd,
+            onCollectionDelete: handleDialogDelete,
+            onLoad: handleDialogsLoad
+        });
+    }
+
+
+
+
+    /* ==============================
+       MEDIA HANDLERS
+    ============================== */
+
+    function handleMediaLoad(_media) {
+        graylog.log("Media loaded");
+
+        media = _media;
+        loadDialogs();
+    }
+
+    function handleMediaChange(_media) {
+        if (_media._data.id === mrdID) {
+            graylog.info("Media state changed: " + _media.getState());
+        }
+    }
+
+    function handleMediaError(err) {
+        graylog.error("Media error: " + JSON.stringify(err));
+    }
+
+    /* ==============================
+       USER HANDLERS
+    ============================== */
+
+    function handleUserLoad() {
+        graylog.log("User loaded");
+        //window.finesseBridge.setTeam("sales")
+
+        user.getMediaList({
+            onLoad: function (mediaList) {
+
+                graylog.log("MediaList loaded");
+
+                mediaList.getMedia({
+                    id: mrdID,
+                    onLoad: handleMediaLoad,
+                    onChange: handleMediaChange,
+                    onError: handleMediaError
+                });
+
+            }
+        });
+    }
+
+    function handleUserChange() {
+        graylog.info("User state changed: " + user.getState());
+    }
+
+
+    /* ==============================
+       INIT
+    ============================== */
+
+    return {
+        init: function (chatMrdId, _scriptUrl) {
+
+            scriptUrl = _scriptUrl || "";
+			mrdID = chatMrdId;
+            finesse.clientservices.ClientServices.init(finesse.gadget.Config);
+
+            initializeChatDataLogger();
+            graylog.init(gadgets.Hub, "ChatDataGadget");
+			graylog.info("MrdID:"+mrdID);
+            graylog.info("chat Data Gadget initializing...");
+             if (window.__vueHubConnected) {
+                        window.__vueHubConnected();
+             }
+
+
+            user = new finesse.restservices.User({
+                id: finesse.gadget.Config.id,
+                onLoad: handleUserLoad,
+                onChange: handleUserChange
+            });
+
+            
+        }
+    };
+
+}(jQuery));
