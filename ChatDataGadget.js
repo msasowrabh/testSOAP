@@ -3,45 +3,177 @@ finesse.modules = finesse.modules || {};
 
 finesse.modules.Gadget = (function ($) {
 
-    var user, media, mrdID = "", mediaDialogs, clientLogs;
-    var cachedToken = null;
-    var tokenExpiry = 0;
+    var graylog = {
+        init: function() {},
+        log: function() {},
+        info: function() {},
+        warn: function() {},
+        error: function() {},
+        debug: function() {}
+    };
 
-    var OKTA_TOKEN_URL = "https://assurant.oktapreview.com/oauth2/aus26n6j3p4xj3UEE0h8/v1/token";
-    var RETRIEVE_URL   = "https://intra-api-gl-ccd-model.assurant.com/ccd/shared/liason/v1/retrieve";
-    var SUBSCRIPTION_KEY = "bfb35b140a194dd7b88f8305d45366bc";
-    var CLIENT_ID      = "0oa26n6exiojXTKSC0h8";
-    var CLIENT_SECRET  = "UO8E5wbWsqTimRnXGyInnMweUGAISZj11WIXxTBQXDMg_iTDBXTqnTh2N8TPfY7R";
+    var user, media, mrdID = "", mediaDialogs;
+    var scriptUrl;
 
-    function getAuthToken() {
-        if (cachedToken && Date.now() < tokenExpiry - 60000) {
-            clientLogs.log("[getAuthToken] Using cached token, expires in " + Math.round((tokenExpiry - Date.now()) / 1000) + "s");
-            return Promise.resolve(cachedToken);
+    var storedCallData = null;
+    var activeDialogCounts = {}; // { dialogId: 'chat' | 'call' }
+    var webhookSent = false; // guards against the chat-end webhook firing more than once per chat
+
+    // Webex Connect inbound webhook — fired when an agent ends a chat (dialog → WRAP_UP).
+    // NOTE: the Key ships in client-side code and is publicly visible; keep it scoped to this
+    // single inbound flow. Replace the placeholder below with the provided service key.
+    var CHAT_END_WEBHOOK_URL = "https://hooks.us.webexconnect.io/events/DEKNS3IYEN";
+    var CHAT_END_WEBHOOK_KEY = "<-provided service key->";
+
+    function postChatEndWebhook(dialog) {
+        // The dialog reports WRAPPING_UP on more than one change event (enter wrap-up and
+        // again on end wrap-up), so send only on the first one per chat.
+        if (webhookSent) {
+            graylog.log("[chat-end webhook] already sent for this chat, skipping");
+            return;
+        }
+        webhookSent = true;
+
+        // All fields originate from the chat webPayload (same data sent to CCE on chat arrival),
+        // which is cached in storedCallData. mapWebPayload expands short keys (I→decryptedLoanNumber,
+        // S→fullName) and passes conversationId/customerName/userId/threadId through as-is.
+        var chat = storedCallData ? mapWebPayload(storedCallData.webPayload) : {};
+
+        var agentId = "";
+        try {
+            agentId = (finesse.gadget.Config && finesse.gadget.Config.id) || "";
+        } catch (e) {
+            graylog.warn("[chat-end webhook] agentId unavailable: " + e.message);
         }
 
-        clientLogs.log("[getAuthToken] No valid cached token, fetching new token from Okta...");
+        var body = {
+            conversationId:    chat.conversationId || (dialog && dialog._data && dialog._data.id) || "",
+            loanNumber:        chat.decryptedLoanNumber || "",
+            customerName:      chat.customerName || "",
+            userId:            chat.userId || "",
+            threadId:          chat.threadId || "",
+            fullNamePlainText: chat.fullName || "",
+            agentId:           agentId
+        };
 
-        var params = new URLSearchParams();
-        params.append("grant_type", "client_credentials");
-        params.append("client_id", CLIENT_ID);
-        params.append("client_secret", CLIENT_SECRET);
-        params.append("scope", "claim");
+        graylog.log("[chat-end webhook] posting: " + JSON.stringify(body));
 
-        return fetch(OKTA_TOKEN_URL, {
+        fetch(CHAT_END_WEBHOOK_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: params
+            headers: {
+                "Content-Type": "application/json",
+                "Key": CHAT_END_WEBHOOK_KEY
+            },
+            body: JSON.stringify(body),
+            keepalive: true
         })
-        .then(function(response) {
-            clientLogs.log("[getAuthToken] Okta response status: " + response.status);
-            if (!response.ok) throw new Error("Okta token request failed: " + response.status);
-            return response.json();
+        .then(function (res) { graylog.log("[chat-end webhook] status: " + res.status); })
+        .catch(function (err) { graylog.error("[chat-end webhook] failed: " + (err && err.message)); });
+    }
+
+    function countAdd(dialog) {
+        var state = dialog._data.state;
+        if (state === 'FAILED' || state === 'DROPPED') return;
+        var mediaId = dialog._data.mediaProperties && dialog._data.mediaProperties.mediaId;
+        activeDialogCounts[dialog._data.id] = (mediaId === mrdID) ? 'chat' : 'call';
+    }
+
+    function countRemove(dialogId) {
+        delete activeDialogCounts[dialogId];
+    }
+
+    function publishCounts() {
+        var chats = 0, calls = 0;
+        Object.keys(activeDialogCounts).forEach(function(id) {
+            if (activeDialogCounts[id] === 'chat') chats++;
+            else calls++;
+        });
+        graylog.log('[counts] activeChats=' + chats + ' activeCalls=' + calls);
+        if (window.finesseBridge && window.finesseBridge.setMediaCounts) {
+            window.finesseBridge.setMediaCounts(chats, calls);
+        }
+    }
+
+    function initializeChatDataLogger() {
+        var graylogFactory = window.graylogLogger;
+        if (graylogFactory && typeof graylogFactory.createLoggerFactory === "function") {
+            graylog = graylogFactory.createLoggerFactory({
+                gadgetName: "ChatDataGadget",
+                remoteEnabled: true,
+                level: "log",
+                remoteTransport: "pubsub",
+                getContext: function() {
+                    return window.logContext ? Object.assign({}, window.logContext) : {};
+                }
+            }).createClient("chatDataGadget");
+            graylog.init = function() {};
+            return;
+        }
+
+        var fallbackClient = finesse && finesse.cslogger && finesse.cslogger.ClientLogger;
+        if (fallbackClient && typeof fallbackClient.log === "function") {
+            graylog = {
+                init: function(hub, gadgetName) {
+                    if (typeof fallbackClient.init === "function") {
+                        fallbackClient.init(hub, gadgetName || "ChatDataGadget");
+                    }
+                },
+                log: function(msg) { fallbackClient.log(msg); },
+                info: function(msg) { fallbackClient.log(msg); },
+                warn: function(msg) { fallbackClient.log(msg); },
+                error: function(msg) { fallbackClient.log(msg); },
+                debug: function(msg) { fallbackClient.log(msg); }
+            };
+            return;
+        }
+
+        graylog = {
+            init: function() {},
+            log: function() {},
+            info: function() {},
+            warn: function() {},
+            error: function() {},
+            debug: function() {}
+        };
+    }
+
+    function callUpdate(fieldId, newValue) {
+        if (!storedCallData) {
+            graylog.info("[callUpdate] No stored call data, skipping");
+            return;
+        }
+        var shortKey = getShortKey(fieldId);
+        storedCallData.webPayload[shortKey] = newValue;
+        graylog.info("[callUpdate] fieldId=" + fieldId + " shortKey=" + shortKey + " newValue=" + newValue);
+
+        var UPDATE_URL     = scriptUrl + "/softphone/callData/update";
+        fetch(UPDATE_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Correlation-Id": storedCallData.callId || ""
+            },
+            body: JSON.stringify(storedCallData)
         })
-        .then(function(tokenData) {
-            cachedToken = tokenData.access_token;
-            tokenExpiry = Date.now() + (tokenData.expires_in * 1000);
-            clientLogs.log("[getAuthToken] Token received, expires_in=" + tokenData.expires_in + "s, token_type=" + tokenData.token_type);
-            return cachedToken;
+        .then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.text();
+        })
+        .then(function (text) {
+            if (!text) {
+                graylog.info("[callUpdate] Update success (empty response)");
+                return;
+            }
+            var data = JSON.parse(text);
+            graylog.info("[callUpdate] Update success: " + JSON.stringify(data));
+            storedCallData = data;
+            var chatData = mapWebPayload(data.webPayload);
+            if (window.finesseBridge) {
+                window.finesseBridge.setChatData(chatData);
+            }
+        })
+        .catch(function (err) {
+            graylog.error("[callUpdate] Update failed: " + err.message);
         });
     }
 
@@ -51,113 +183,149 @@ finesse.modules.Gadget = (function ($) {
 
     function handleDialogAdd(dialog) {
         var dialogMediaId = dialog._data.mediaProperties.mediaId;
-        clientLogs.log("[handleDialogAdd] Dialog arrived - dialogMediaId=" + dialogMediaId + ", expected mrdID=" + mrdID);
+        graylog.info("[handleDialogAdd] Dialog arrived - dialogMediaId=" + dialogMediaId + ", expected mrdID=" + mrdID);
+
+        countAdd(dialog);
+        publishCounts();
 
         if (dialogMediaId !== mrdID) {
-            clientLogs.log("[handleDialogAdd] Skipping dialog — mediaId mismatch");
+            graylog.error("[handleDialogAdd] Skipping dialog — mediaId mismatch");
             return;
         }
 
-        clientLogs.log("Chat arrived!");
+        graylog.info("Chat arrived!");
+		webhookSent = false; // new chat — allow the chat-end webhook to fire again
+		dialog.addHandler("change", handleDialogChange);
+
+        // single chat at a time — hand the dialog to the bridge so its CLOSECHAT
+        // handler can move it to WRAP_UP when the customer ends the chat
+        if (window.finesseBridge && window.finesseBridge.setActiveDialog) {
+            window.finesseBridge.setActiveDialog(dialog);
+        }
 
         var callVars = dialog._data.mediaProperties;
-        clientLogs.log("Call Vars: " + JSON.stringify(callVars));
+        graylog.log("Call Vars: " + JSON.stringify(callVars));
 
         var callVariablesRaw = callVars.callvariables;
-        clientLogs.log("[handleDialogAdd] callvariables raw: " + JSON.stringify(callVariablesRaw));
+        graylog.log("[handleDialogAdd] callvariables raw: " + JSON.stringify(callVariablesRaw));
 
         var callVariablesArray = callVars.callvariables.CallVariable;
         if (!Array.isArray(callVariablesArray)) {
-            clientLogs.log("[handleDialogAdd] WARNING: CallVariable is not an array, got type=" + typeof callVariablesArray + ", value=" + JSON.stringify(callVariablesArray));
+            graylog.warn("[handleDialogAdd] WARNING: CallVariable is not an array, got type=" + typeof callVariablesArray + ", value=" + JSON.stringify(callVariablesArray));
         } else {
-            clientLogs.log("[handleDialogAdd] CallVariable count: " + callVariablesArray.length);
+            graylog.info("[handleDialogAdd] CallVariable count: " + callVariablesArray.length);
         }
-        clientLogs.log("callVariablesArray: " + JSON.stringify(callVariablesArray));
+        graylog.log("callVariablesArray: " + JSON.stringify(callVariablesArray));
 
         // Helper function
         function getCallVariable(name) {
             var item = Array.isArray(callVariablesArray) && callVariablesArray.find(cv => cv.name === name);
             var value = item && item.value ? item.value : "";
-            clientLogs.log("[getCallVariable] " + name + " = " + (value || "(empty)"));
+            graylog.log("[getCallVariable] " + name + " = " + (value || "(empty)"));
             return value;
         }
 
         var mediaResourceId = getCallVariable("user_DR_MediaResourceID");
-        clientLogs.log("user_DR_MediaResourceID: " + mediaResourceId);
+        graylog.info("user_DR_MediaResourceID: " + mediaResourceId);
 
         if (!mediaResourceId) {
-            clientLogs.log("[handleDialogAdd] WARNING: mediaResourceId is empty — API call will proceed with empty callId");
+            graylog.warn("[handleDialogAdd] WARNING: mediaResourceId is empty — API call will proceed with empty callId");
         }
 
-        getAuthToken()
-            .then(function(token) {
-                var requestBody = JSON.stringify({ callId: mediaResourceId });
-                clientLogs.log("[handleDialogAdd] Calling Retrieve API - URL=" + RETRIEVE_URL + " X-Correlation-Id=" + mediaResourceId + " body=" + requestBody);
-                return fetch(RETRIEVE_URL, {
+        var requestBody = JSON.stringify({ callId: mediaResourceId });
+        var RETRIEVE_URL = scriptUrl + "/softphone/callData/retrieve";
+        graylog.log("[handleDialogAdd] Calling Retrieve API - URL=" + RETRIEVE_URL + " X-Correlation-Id=" + mediaResourceId + " body=" + requestBody);
+
+		fetch(RETRIEVE_URL, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
-                        "Authorization": "Bearer " + token,
-                        "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY,
                         "X-Correlation-Id": mediaResourceId
                     },
                     body: requestBody
-                });
             })
             .then(function(response) {
-                clientLogs.log("[handleDialogAdd] Retrieve API response status: " + response.status + " ok=" + response.ok);
-                if (!response.ok) throw new Error("Retrieve API responded with status " + response.status);
+                if (!response.ok) throw new Error("HTTP " + response.status);
                 return response.json();
             })
             .then(function(apiData) {
-                clientLogs.log("API response: " + JSON.stringify(apiData));
-                clientLogs.log("[handleDialogAdd] apiData keys: " + Object.keys(apiData).join(", "));
+                graylog.log("API response: " + JSON.stringify(apiData));
+                graylog.log("[handleDialogAdd] apiData keys: " + Object.keys(apiData).join(", "));
 
                 var webPayload = apiData.webPayload;
-                clientLogs.log("[handleDialogAdd] webPayload present=" + (webPayload != null) + " value=" + JSON.stringify(webPayload));
+                graylog.log("[handleDialogAdd] webPayload present=" + (webPayload != null) + " value=" + JSON.stringify(webPayload));
+
+                storedCallData = apiData;
 
                 var chatData = mapWebPayload(webPayload);
-                clientLogs.log("Mapped chat data: " + JSON.stringify(chatData));
-                clientLogs.log("[handleDialogAdd] chatData keys: " + Object.keys(chatData).join(", "));
+                graylog.log("Mapped chat data: " + JSON.stringify(chatData));
 
-                clientLogs.log("[handleDialogAdd] Calling finesseBridge.setChatData...");
-                window.finesseBridge.setChatData(chatData);
-                if (window.finesseBridge && window.finesseBridge.adjustHeight) {
-                    clientLogs.log("[handleDialogAdd] Calling finesseBridge.adjustHeight...");
-                    window.finesseBridge.adjustHeight();
+                if (window.finesseBridge) {
+                    window.finesseBridge.setChatData(chatData);
+                    window.finesseBridge._updateHandler = callUpdate;
+                    if (window.finesseBridge.adjustHeight) {
+                        graylog.debug("[handleDialogAdd] Calling finesseBridge.adjustHeight...");
+                        window.finesseBridge.adjustHeight();
+                    }
                 }
-                clientLogs.log("[handleDialogAdd] Data flow complete");
+                graylog.log("[handleDialogAdd] Data flow complete");
             })
             .catch(function(err) {
-                clientLogs.log("Failed to fetch chat data: " + err.message);
-                clientLogs.log("[handleDialogAdd] Error stack: " + (err.stack || "unavailable"));
+                graylog.error("Failed to fetch chat data: " + err.message);
+                graylog.error("[handleDialogAdd] Error stack: " + (err.stack || "unavailable"));
             });
     }
 
-    function handleDialogDelete(dialog) {
-        clientLogs.log("Chat ended");
+    function handleDialogChange(dialog) {
+        var dialogMediaId = dialog._data && dialog._data.mediaProperties && dialog._data.mediaProperties.mediaId;
+        if (dialogMediaId !== mrdID) return;
+        var state = dialog._data.state;
+        graylog.info("[handleDialogChange] dialog state=" + state + " id=" + dialog._data.id);
+        if (state === 'WRAPPING_UP') {
+            graylog.log("agent end caught — dialog entered WRAPPING_UP id=" + dialog._data.id);
+            postChatEndWebhook(dialog);
+        }
+    }
 
-        window.finesseBridge.setChatData(null);
+    function handleDialogDelete(dialog) {
+        graylog.info("Chat ended");
+
+        countRemove(dialog._data.id);
+        publishCounts();
+
+        storedCallData = null;
+        if (window.finesseBridge) {
+            window.finesseBridge._updateHandler = null;
+            window.finesseBridge.setChatData(null);
+            if (window.finesseBridge.setActiveDialog) {
+                window.finesseBridge.setActiveDialog(null);
+            }
+             if (window.finesseBridge.adjustHeight) {
+                        graylog.debug("[handleDialogAdd] Calling finesseBridge.adjustHeight...");
+                        window.finesseBridge.adjustHeight();
+            }
+        }
     }
 
     function handleDialogsLoad() {
-        clientLogs.log("Dialogs loaded");
+        graylog.info("Dialogs loaded");
 
         var dialogs = mediaDialogs.getCollection();
         var dialogIds = Object.keys(dialogs);
-        clientLogs.log("[handleDialogsLoad] Dialog count: " + dialogIds.length + " ids=[" + dialogIds.join(", ") + "]");
+        graylog.info("[handleDialogsLoad] Dialog count: " + dialogIds.length + " ids=[" + dialogIds.join(", ") + "]");
 
         for (var id in dialogs) {
-            clientLogs.log("[handleDialogsLoad] Processing dialog id=" + id);
+            graylog.log("[handleDialogsLoad] Processing dialog id=" + id);
             handleDialogAdd(dialogs[id]);
         }
     }
 
     function loadDialogs() {
-        clientLogs.log("Loading dialogs...");
+        graylog.log("Loading dialogs...");
 
         mediaDialogs = media.getMediaDialogs({
             onCollectionAdd: handleDialogAdd,
+            //onCollectionChange: handleDialogChange,
             onCollectionDelete: handleDialogDelete,
             onLoad: handleDialogsLoad
         });
@@ -171,7 +339,7 @@ finesse.modules.Gadget = (function ($) {
     ============================== */
 
     function handleMediaLoad(_media) {
-        clientLogs.log("Media loaded");
+        graylog.log("Media loaded");
 
         media = _media;
         loadDialogs();
@@ -179,12 +347,12 @@ finesse.modules.Gadget = (function ($) {
 
     function handleMediaChange(_media) {
         if (_media._data.id === mrdID) {
-            clientLogs.log("Media state changed: " + _media.getState());
+            graylog.info("Media state changed: " + _media.getState());
         }
     }
 
     function handleMediaError(err) {
-        clientLogs.log("Media error: " + JSON.stringify(err));
+        graylog.error("Media error: " + JSON.stringify(err));
     }
 
     /* ==============================
@@ -192,13 +360,13 @@ finesse.modules.Gadget = (function ($) {
     ============================== */
 
     function handleUserLoad() {
-        clientLogs.log("User loaded");
+        graylog.log("User loaded");
         //window.finesseBridge.setTeam("sales")
 
         user.getMediaList({
             onLoad: function (mediaList) {
 
-                clientLogs.log("MediaList loaded");
+                graylog.log("MediaList loaded");
 
                 mediaList.getMedia({
                     id: mrdID,
@@ -212,7 +380,12 @@ finesse.modules.Gadget = (function ($) {
     }
 
     function handleUserChange() {
-        clientLogs.log("User state changed: " + user.getState());
+        var state = user.getState();
+        graylog.info("User state changed: " + state);
+
+        if (state === 'WRAP_UP' && storedCallData !== null) {
+            graylog.info("agent moved to WRAP_UP — confirmed caused by chat end, callId=" + storedCallData.callId);
+        }
     }
 
 
@@ -221,16 +394,16 @@ finesse.modules.Gadget = (function ($) {
     ============================== */
 
     return {
-        init: function (chatMrdId) {
+        init: function (chatMrdId, _scriptUrl) {
 
+            scriptUrl = _scriptUrl || "";
 			mrdID = chatMrdId;
             finesse.clientservices.ClientServices.init(finesse.gadget.Config);
 
-            // ✅ Initialize logger FIRST
-            clientLogs = finesse.cslogger.ClientLogger;
-            clientLogs.init(gadgets.Hub, "MSAChatDataGadget");
-			clientLogs.log("MrdID:"+mrdID);
-            clientLogs.log("chat Data Gadget initializing...");
+            initializeChatDataLogger();
+            graylog.init(gadgets.Hub, "ChatDataGadget");
+			graylog.info("MrdID:"+mrdID);
+            graylog.info("chat Data Gadget initializing...");
              if (window.__vueHubConnected) {
                         window.__vueHubConnected();
              }
@@ -242,7 +415,7 @@ finesse.modules.Gadget = (function ($) {
                 onChange: handleUserChange
             });
 
-            
+
         }
     };
 
