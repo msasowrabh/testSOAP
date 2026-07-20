@@ -22,8 +22,6 @@ finesse.modules.Gadget = (function ($) {
     // Webex Connect inbound webhook — fired when an agent ends a chat (dialog → WRAP_UP).
     // NOTE: the Key ships in client-side code and is publicly visible; keep it scoped to this
     // single inbound flow. Replace the placeholder below with the provided service key.
-    var CHAT_END_WEBHOOK_URL = "https://hooks.us.webexconnect.io/events/DEKNS3IYEN";
-    var CHAT_END_WEBHOOK_KEY = "<-provided service key->";
 
     function postChatEndWebhook(dialog) {
         // The dialog reports WRAPPING_UP on more than one change event (enter wrap-up and
@@ -46,6 +44,12 @@ finesse.modules.Gadget = (function ($) {
             graylog.warn("[chat-end webhook] agentId unavailable: " + e.message);
         }
 
+        // If the customer ended the chat, Manage Digital Channel already sent
+        // $$$$CLOSECHAT$$$$. Send action:"close" so the survey flow suppresses its own
+        // (2nd) $$$$CLOSECHAT$$$$. On agent-end there was no prior CLOSECHAT, so we omit
+        // action and let the survey flow send it to close the customer's chat window.
+        var endedByCustomer = !!(dialog && dialog._endedByCustomer);
+
         var body = {
             conversationId:    chat.conversationId || (dialog && dialog._data && dialog._data.id) || "",
             loanNumber:        chat.decryptedLoanNumber || "",
@@ -55,6 +59,10 @@ finesse.modules.Gadget = (function ($) {
             fullNamePlainText: chat.fullName || "",
             agentId:           agentId
         };
+
+        if (endedByCustomer) {
+            body.action = "close";
+        }
 
         graylog.log("[chat-end webhook] posting: " + JSON.stringify(body));
 
